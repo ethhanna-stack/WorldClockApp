@@ -1,98 +1,218 @@
-import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  FlatList,
+  RefreshControl,
+  ActivityIndicator,
+} from 'react-native';
+import { useAuth } from '../../contexts/AuthContext';
+import { getContacts } from '../../utils/helpers';
+import { Contact } from '../../types';
+import { formatTime, formatDate } from '../../utils/helpers';
 
-import { HelloWave } from '@/components/hello-wave';
-import ParallaxScrollView from '@/components/parallax-scroll-view';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { Link } from 'expo-router';
+interface ClockItem {
+  id: string;
+  name: string;
+  email: string;
+  timezone: string;
+  isCurrentUser?: boolean;
+}
 
 export default function HomeScreen() {
-  return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-      headerImage={
-        <Image
-          source={require('@/assets/images/partial-react-logo.png')}
-          style={styles.reactLogo}
-        />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Welcome!</ThemedText>
-        <HelloWave />
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> to see changes.
-          Press{' '}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({
-              ios: 'cmd + d',
-              android: 'cmd + m',
-              web: 'F12',
-            })}
-          </ThemedText>{' '}
-          to open developer tools.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <Link href="/modal">
-          <Link.Trigger>
-            <ThemedText type="subtitle">Step 2: Explore</ThemedText>
-          </Link.Trigger>
-          <Link.Preview />
-          <Link.Menu>
-            <Link.MenuAction title="Action" icon="cube" onPress={() => alert('Action pressed')} />
-            <Link.MenuAction
-              title="Share"
-              icon="square.and.arrow.up"
-              onPress={() => alert('Share pressed')}
-            />
-            <Link.Menu title="More" icon="ellipsis">
-              <Link.MenuAction
-                title="Delete"
-                icon="trash"
-                destructive
-                onPress={() => alert('Delete pressed')}
-              />
-            </Link.Menu>
-          </Link.Menu>
-        </Link>
+  const { userProfile } = useAuth();
+  const [clocks, setClocks] = useState<ClockItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [currentTime, setCurrentTime] = useState(new Date());
 
-        <ThemedText>
-          {`Tap the Explore tab to learn more about what's included in this starter app.`}
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
-        <ThemedText>
-          {`When you're ready, run `}
-          <ThemedText type="defaultSemiBold">npm run reset-project</ThemedText> to get a fresh{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> directory. This will move the current{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> to{' '}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
-        </ThemedText>
-      </ThemedView>
-    </ParallaxScrollView>
+  useEffect(() => {
+    loadClocks();
+  }, [userProfile]);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCurrentTime(new Date());
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, []);
+
+  const loadClocks = async () => {
+    if (!userProfile) return;
+
+    try {
+      const contacts = await getContacts(userProfile.id);
+      
+      const clockItems: ClockItem[] = [
+        {
+          id: userProfile.id,
+          name: 'You',
+          email: userProfile.email,
+          timezone: userProfile.timezone,
+          isCurrentUser: true,
+        },
+        ...contacts.map((contact) => ({
+          id: contact.id,
+          name: contact.contactDisplayName || contact.contactEmail,
+          email: contact.contactEmail,
+          timezone: contact.contactTimezone,
+        })),
+      ];
+
+      setClocks(clockItems);
+    } catch (error) {
+      console.error('Error loading clocks:', error);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  const onRefresh = () => {
+    setRefreshing(true);
+    loadClocks();
+  };
+
+  const renderClock = ({ item }: { item: ClockItem }) => {
+    const time = formatTime(currentTime, item.timezone);
+    const date = formatDate(currentTime, item.timezone);
+
+    return (
+      <View style={[styles.clockCard, item.isCurrentUser && styles.currentUserCard]}>
+        <View style={styles.clockHeader}>
+          <Text style={styles.clockName}>{item.name}</Text>
+          {item.isCurrentUser && (
+            <View style={styles.badge}>
+              <Text style={styles.badgeText}>YOU</Text>
+            </View>
+          )}
+        </View>
+        <Text style={styles.clockTimezone}>{item.timezone.replace(/_/g, ' ')}</Text>
+        <Text style={styles.clockTime}>{time}</Text>
+        <Text style={styles.clockDate}>{date}</Text>
+      </View>
+    );
+  };
+
+  if (loading) {
+    return (
+      <View style={styles.centerContainer}>
+        <ActivityIndicator size="large" color="#007AFF" />
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.container}>
+      <Text style={styles.header}>World Clocks</Text>
+      <FlatList
+        data={clocks}
+        renderItem={renderClock}
+        keyExtractor={(item) => item.id}
+        contentContainerStyle={styles.listContent}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        }
+        ListEmptyComponent={
+          <View style={styles.emptyContainer}>
+            <Text style={styles.emptyText}>No contacts yet</Text>
+            <Text style={styles.emptySubtext}>
+              Add contacts to see their timezones
+            </Text>
+          </View>
+        }
+      />
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  titleContainer: {
+  container: {
+    flex: 1,
+    backgroundColor: '#f5f5f5',
+  },
+  centerContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  header: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    padding: 20,
+    paddingBottom: 10,
+    color: '#333',
+  },
+  listContent: {
+    padding: 15,
+  },
+  clockCard: {
+    backgroundColor: '#fff',
+    borderRadius: 15,
+    padding: 20,
+    marginBottom: 15,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  currentUserCard: {
+    backgroundColor: '#E6F4FE',
+    borderWidth: 2,
+    borderColor: '#007AFF',
+  },
+  clockHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    marginBottom: 5,
   },
-  stepContainer: {
-    gap: 8,
+  clockName: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  badge: {
+    backgroundColor: '#007AFF',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 10,
+    marginLeft: 10,
+  },
+  badgeText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: 'bold',
+  },
+  clockTimezone: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 10,
+  },
+  clockTime: {
+    fontSize: 36,
+    fontWeight: 'bold',
+    color: '#007AFF',
+    marginBottom: 5,
+  },
+  clockDate: {
+    fontSize: 16,
+    color: '#666',
+  },
+  emptyContainer: {
+    alignItems: 'center',
+    marginTop: 50,
+  },
+  emptyText: {
+    fontSize: 18,
+    color: '#666',
     marginBottom: 8,
   },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
-    position: 'absolute',
+  emptySubtext: {
+    fontSize: 14,
+    color: '#999',
   },
 });
+
